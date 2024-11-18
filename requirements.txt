@@ -1,0 +1,4 @@
+transformers==4.40.2
+dataset==2.19.1
+tokenizers==0.19.1
+torch==2.2.1+cu121
