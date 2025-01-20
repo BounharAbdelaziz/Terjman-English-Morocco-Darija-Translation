@@ -62,7 +62,7 @@ def count_total_tokens(dataset, tokenizer, target_lang="darija"):
         # Increment the total token count
         total_tokens += len(tokens)
         
-    print(f"[INFO] Total number of tokens in the dataset: {total_tokens}")
+    print(f"[INFO] Total number of training tokens for column {target_lang} in the dataset: {total_tokens}")
 
 # ------------------------------------------------------------------------------------------------------------ #
 # ------------------------------------------------------------------------------------------------------------ #
