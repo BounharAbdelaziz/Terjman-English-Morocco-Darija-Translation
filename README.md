@@ -10,6 +10,20 @@ Model checkpoints are available on [Hugging Face](https://huggingface.co/atlasia
 - [Terjman-Large](https://huggingface.co/spaces/atlasia/Terjman-Large-v2)
 - [Terjman-Nano](https://huggingface.co/atlasia/Terjman-Nano) 
 
+Note: Currently developping the second version of Terjman, trained on a larger dataset with translation from many languages to moroccan darija and vice versa.
+
+## Setup and Training
+
+Start by installing the necessary dependencies:
+```bash
+pip install -r requirements.txt
+```
+Then run the training script for the version you would like to train:
+```bash
+python3 train.py
+```
+Note that the v2 code is probably going to change.
+
 ## Usage
 
 Using our model for translation is simple and straightforward. 
