@@ -1,3 +1,5 @@
+# Import necessary libraries
+import wandb
 import torch
 from transformers import (
     AutoTokenizer, 
@@ -14,30 +16,63 @@ import argparse
 import numpy as np
 from utils import print_gpu_utilization, count_total_tokens, preprocess_function, postprocess_text
 
+from evaluate import load
+import numpy as np
+
+# Load metrics
+# metric_bleu = load("bleu")
+metric_bleu = load("sacrebleu")
+metric_chrf = load("chrf")
+metric_ter = load("ter")
+
 
 # Function to filter out rows with missing values in source_lang or target_lang
 def filter_missing_values(example, source_lang, target_lang):
     return example[source_lang] is not None and example[target_lang] is not None
 
 def compute_metrics(eval_preds):
-    
     preds, labels = eval_preds
+    
     if isinstance(preds, tuple):
         preds = preds[0]
+    
+    # Decode the predictions and labels
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
-
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+    
+    print(f'[INFO] decoded_preds[0]: {decoded_preds[0]}')
+    print(f'[INFO] decoded_labels[0]: {decoded_labels[0]}')
 
+    # Post-process text (e.g., remove extra spaces, etc.)
     decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
 
-    result = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    result = {"bleu": result["score"]}
+    # Compute BLEU score
+    bleu_result = metric_bleu.compute(predictions=decoded_preds, references=decoded_labels)
 
+    # Compute chrF score
+    chrf_result = metric_chrf.compute(predictions=decoded_preds, references=decoded_labels)
+    
+    # Compute TER score
+    ter_result = metric_ter.compute(predictions=decoded_preds, references=decoded_labels)
+    
+    # Collect the results
+    result = {
+        "bleu": bleu_result["score"],
+        # "bleu": bleu_result["bleu"],
+        "chrf": chrf_result["score"],
+        "ter": ter_result["score"]
+    }
+
+    # Compute the average generation length
     prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
     result["gen_len"] = np.mean(prediction_lens)
+    
+    # Round results to 4 decimal places
     result = {k: round(v, 4) for k, v in result.items()}
+    
     return result
+
 
 if __name__ == "__main__":
     
@@ -51,72 +86,37 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    TRAIN_FROM_SCRATCH = False
-    
-    BASE_MODELS = { "Helsinki_77M_256": "Helsinki-NLP/opus-mt-en-ar",                       # Terjman-Nano-MAX_LEN-256
-                    "Helsinki_77M_512": "Helsinki-NLP/opus-mt-en-ar",                       # Terjman-Nano-MAX_LEN-512
-                    "Helsinki_240M": "Helsinki-NLP/opus-mt-tc-big-en-ar",                   # Terjman-Large
-                    "1B": "facebook/nllb-200-1.3B",                                         # Terjman-Ultra
-                    "3B": "facebook/nllb-200-3.3B"                                          # Terjman-Supreme
-                }
-    
-    HUB_PATHS = {   "Helsinki_77M_256": "atlasia/Terjman-Nano-v2.1-256",                    # Terjman-Nano
-                    "Helsinki_77M_512": "atlasia/Terjman-Nano-v2.1-512",                    # Terjman-Nano
-                    "Helsinki_240M": "atlasia/Terjman-Large-v2.1",                          # Terjman-Large
-                    "1B": "atlasia/Terjman-Ultra-v2.1",                                     # Terjman-Ultra
-                    "3B": "atlasia/Terjman-Supreme-v2.1"                                    # Terjman-Supreme
-                }
-    
-    BATCH_SIZES = { "Helsinki_77M_256": 64,                                                 # Terjman-Nano-MAX_LEN-256 (80 also work fine)
-                    "Helsinki_77M_512": 64,                                                 # Terjman-Nano-MAX_LEN-512
-                    "Helsinki_240M": 32,                                                    # Terjman-Large
-                    "1B": 8,                                                                # Terjman-Ultra
-                    "3B": 1                                                                 # Terjman-Supreme
-    }
-    
-    N_EPOCHS = {    "Helsinki_77M_256": 20,                                                 # Terjman-Nano-MAX_LEN-256
-                    "Helsinki_77M_512": 10,                                                 # Terjman-Nano-MAX_LEN-512
-                    "Helsinki_240M": 10,                                                    # Terjman-Large was 120 then 100 in v2.0
-                    "1B": 5,                                                                # Terjman-Ultra was 25, now training with 1 and 6. 30 in v2.0
-                    "3B": 2,                                                                # Terjman-Supreme was 5
-    }
-    
-    LERANING_RATES = {  "Helsinki_77M_256": 3e-5,                                           # Terjman-Nano-MAX_LEN-256
-                        "Helsinki_77M_512": 3e-5,                                           # Terjman-Nano-MAX_LEN-512
-                        "Helsinki_240M": 5e-5,                                              # Terjman-Large was 5e-4 in v2.0
-                        "1B": 1e-5,                                                         # Terjman-Ultra 5e-4 in v2.0
-                        "3B": 1e-5,                                                         # Terjman-Supreme 5e-4 in v2.0
-    }
-    
-    GRAD_ACC = {    "Helsinki_77M_256": 1,                                                  # Terjman-Nano-MAX_LEN-256
-                    "Helsinki_77M_512": 1,                                                  # Terjman-Nano-MAX_LEN-512
-                    "Helsinki_240M": 2,                                                     # Terjman-Large
-                    "1B": 4,                                                                # Terjman-Ultra
-                    "3B": 8                                                                 # Terjman-Supreme
-    }
-    
     # Dataset to use
-    DATA_PATH = "BounharAbdelaziz/darija-translation-v5"
+    DATA_PATH = "BounharAbdelaziz/Terjman-v2-English-Darija-Dataset-580K"
     
-    TOKENIZER_PATH = "BounharAbdelaziz/Moroccan-Darija-Tokenizer-80k"
+    # experiment versions:
+    #   - 2.1: trained on 580K en-darija. source english, target darija
+    version = "2.1"
+    
+    # project name to appear in wandb
+    project_name = f"Terjman-v{version}"
+    
+    # how to select best model
+    METRIC_FOR_BEST_MODEL = 'bleu'
     
     # Training hyperparameters and arguments
-    
     weight_decay=0.01
-    save_total_limit=3
+    max_grad_norm = 1.0
+    save_total_limit=1
     predict_with_generate=True
-    warmup_ratio=0.03
+    warmup_ratio=0.1
     gradient_checkpointing=True
+    lr_scheduler_type = "linear"
     
     # Evaluation hyperparameters    
-    eval_steps = 1000
-    save_steps = 1000
-    logging_steps = 100
-    eval_strategy="epoch"
+    eval_steps = 100
+    save_steps = 100
+    logging_steps = 50
+    eval_strategy="steps"
     push_to_hub=True
     
     source_lang="english"
-    target_lang="darija_ar"
+    target_lang="darija_Arab"
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
@@ -124,16 +124,97 @@ if __name__ == "__main__":
     MAX_LEN = args.max_len
     TRAIN_NLLB = True if args.train_nllb == 1 else False
     FP16_TRAINING = False
-    BF16_TRAINING = True # update in v2.1: now True for all. Was False for Helsinki models, True for NLLB models in v1.0
+    BF16_TRAINING = True
+    TRAIN_FROM_SCRATCH = False
     
-    gradient_accumulation_steps=GRAD_ACC[MODEL_NAME] # 4 for NLLB
+    BASE_MODELS = { 
+        "Helsinki_77M_256": "Helsinki-NLP/opus-mt-en-ar",                       # Terjman-Nano-MAX_LEN-256
+        "Helsinki_77M_512": "Helsinki-NLP/opus-mt-en-ar",                       # Terjman-Nano-MAX_LEN-512
+        "Helsinki_240M": "Helsinki-NLP/opus-mt-tc-big-en-ar",                   # Terjman-Large
+        "1B": "facebook/nllb-200-1.3B",                                         # Terjman-Ultra
+        "3B": "facebook/nllb-200-3.3B"                                          # Terjman-Supreme
+    }
+    
+    HUB_PATHS = {   
+        "Helsinki_77M_256": f"BounharAbdelaziz/Terjman-Nano-v{version}-256",    # Terjman-Nano
+        "Helsinki_77M_512": f"BounharAbdelaziz/Terjman-Nano-v{version}-512",    # Terjman-Nano
+        "Helsinki_240M": f"BounharAbdelaziz/Terjman-Large-v{version}",          # Terjman-Large
+        "1B": f"BounharAbdelaziz/Terjman-Ultra-v{version}",                     # Terjman-Ultra
+        "3B": f"BounharAbdelaziz/Terjman-Supreme-v{version}"                    # Terjman-Supreme
+    }
+    
+    BATCH_SIZES = { 
+        "Helsinki_77M_256": 64,                                                 # Terjman-Nano-MAX_LEN-256 (80 also work fine)
+        "Helsinki_77M_512": 64,                                                 # Terjman-Nano-MAX_LEN-512
+        "Helsinki_240M": 16,                                                    # Terjman-Large
+        "1B": 4,                                                                # Terjman-Ultra
+        "3B": 1                                                                 # Terjman-Supreme
+    }
+    
+    N_EPOCHS = {    
+        "Helsinki_77M_256": 8,                                                  # Terjman-Nano-MAX_LEN-256
+        "Helsinki_77M_512": 8,                                                  # Terjman-Nano-MAX_LEN-512
+        "Helsinki_240M": 8,                                                     # Terjman-Large was 120 then 100 in v2.0
+        "1B": 3,                                                                # Terjman-Ultra was 25, now training with 1 and 6. 30 in v2.0
+        "3B": 3,                                                                # Terjman-Supreme was 5
+    }
+    
+    LERANING_RATES = {  
+        "Helsinki_77M_256": 3e-5,                                               # Terjman-Nano-MAX_LEN-256
+        "Helsinki_77M_512": 3e-5,                                               # Terjman-Nano-MAX_LEN-512
+        "Helsinki_240M": 5e-5,                                                  # Terjman-Large was 5e-4 in v2.0
+        "1B": 3e-5,                                                             # Terjman-Ultra 5e-4 in v2.0
+        "3B": 3e-5,                                                             # Terjman-Supreme 5e-4 in v2.0
+    }
+    
+    GRAD_ACC = {    
+        "Helsinki_77M_256": 1,                                                  # Terjman-Nano-MAX_LEN-256
+        "Helsinki_77M_512": 1,                                                  # Terjman-Nano-MAX_LEN-512
+        "Helsinki_240M": 8,                                                     # Terjman-Large
+        "1B": 32,                                                               # Terjman-Ultra
+        "3B": 64                                                                # Terjman-Supreme
+    }
+    
+    # Tokenizer if training from scratch
+    MY_TOKENIZER_PATH = "BounharAbdelaziz/Moroccan-Darija-Tokenizer-80k"
+        
+    gradient_accumulation_steps=GRAD_ACC[MODEL_NAME]
     BASE_MODEL = BASE_MODELS[MODEL_NAME]
     HUB_PATH = HUB_PATHS[MODEL_NAME]
     batch_size = BATCH_SIZES[MODEL_NAME]
     n_epochs = N_EPOCHS[MODEL_NAME]
     learning_rate = LERANING_RATES[MODEL_NAME]
     
-    use_flash_attention_2 = True if MODEL_NAME in ["3B"] else False
+    use_flash_attention_2 = False #True if MODEL_NAME in ["3B"] else False
+    
+    fp16 = '-FP16' if FP16_TRAINING else ''
+    
+    run_name = f'{BASE_MODEL.split("/")[-1]}-bs-{batch_size}-lr-{learning_rate}-ep-{n_epochs}-wp-{warmup_ratio}-gacc-{gradient_accumulation_steps}-gnm-{max_grad_norm}{fp16}-mx-{MAX_LEN}-v{version}'
+    assert '--' not in run_name, f"[WARN] Detected -- in run_name. This will cause a push_to_hub error! Found run_name={run_name} "
+    assert len(run_name) < 96, f"[WARN] run_name too long, found len(run_name)={len(run_name)} > 96. This will cause a push_to_hub error! Consider squeezing it. Found run_name={run_name}"
+
+    
+    # Initialize wandb
+    wandb.init(
+        # set the wandb project where this run will be logged, all runs will be under this project
+        project=project_name,   
+        # Group runs by model size
+        group=BASE_MODEL,       
+        # Unique run name
+        name=run_name,
+        # track hyperparameters and run metadata
+        config={
+            "learning_rate": learning_rate,
+            "num_train_epochs": n_epochs,
+            "batch_size": batch_size,
+            "warmup_ratio": warmup_ratio,
+            # "warmup_steps": warmup_steps,
+            "max_grad_norm": max_grad_norm,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "weight_decay": weight_decay,
+            "dataset": DATA_PATH,
+        }
+    )
     
     
     print(f'[INFO] MODEL_NAME: {MODEL_NAME},  MAX_LEN: {MAX_LEN}, TRAIN_NLLB: {TRAIN_NLLB}')
@@ -178,20 +259,16 @@ if __name__ == "__main__":
     # Load model directly
     if TRAIN_NLLB:
         if TRAIN_FROM_SCRATCH:
-            tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+            tokenizer = AutoTokenizer.from_pretrained(MY_TOKENIZER_PATH)
         else:
             tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, src_lang="eng_Latn", tgt_lang="ary_Arab")
     else:
         if TRAIN_FROM_SCRATCH:
-            tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+            tokenizer = AutoTokenizer.from_pretrained(MY_TOKENIZER_PATH)
         else:
             tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
             
     # Set special tokens
-    # tokenizer.pad_token = "<pad>"
-    # tokenizer.unk_token = "<unk>"
-    # tokenizer.bos_token = "<s>"
-    # tokenizer.eos_token = "</s>"
     tokenizer.add_special_tokens({
                 'pad_token': '<pad>', 
                 'unk_token': '<unk>', 
@@ -276,14 +353,14 @@ if __name__ == "__main__":
             ).to(device)
         
     # Count total number of tokens in the dataset
-    count_total_tokens(dataset['train'], tokenizer, target_lang)
+    count_total_tokens(dataset['train'], target_lang)
     
     # Initialize a data collator object
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
     
     # tokenize the dataset
-    train_dataset = dataset['train'].map(lambda x : preprocess_function(x, tokenizer=tokenizer, max_length=MAX_LEN, source_lang=source_lang, target_lang=target_lang), batched=True)
-    test_dataset = dataset['test'].map(lambda x : preprocess_function(x, tokenizer=tokenizer, max_length=MAX_LEN, source_lang=source_lang, target_lang=target_lang), batched=True)
+    train_dataset = dataset['train'].map(lambda x : preprocess_function(x, tokenizer=tokenizer, max_length=MAX_LEN, source_lang=source_lang, target_lang=target_lang), batched=True, batch_size=64)
+    test_dataset = dataset['test'].map(lambda x : preprocess_function(x, tokenizer=tokenizer, max_length=MAX_LEN, source_lang=source_lang, target_lang=target_lang), batched=True, batch_size=64)
     
     # Training arguments
     training_args = Seq2SeqTrainingArguments(
@@ -306,9 +383,11 @@ if __name__ == "__main__":
         push_to_hub=push_to_hub,
         gradient_checkpointing=gradient_checkpointing,
         gradient_accumulation_steps=gradient_accumulation_steps,
-        # logging_dir="logs",
-        # report_to="tensorboard",
+        metric_for_best_model=METRIC_FOR_BEST_MODEL,
+        report_to="wandb",
         load_best_model_at_end=True,
+        max_grad_norm = max_grad_norm,
+        lr_scheduler_type=lr_scheduler_type,
     )    
 
     # Initialize a Sequence to Sequence Trainer
