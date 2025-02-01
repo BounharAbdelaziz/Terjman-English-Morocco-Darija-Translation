@@ -58,7 +58,7 @@ def compute_metrics(eval_preds):
     
     # Collect the results
     result = {
-        "bleu": bleu_result["score"],
+        "bleu": bleu_result["score"] * 100, # in percentage
         # "bleu": bleu_result["bleu"],
         "chrf": chrf_result["score"],
         "ter": ter_result["score"]
@@ -82,16 +82,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Trainer of a model that translate English text to Moroccan Darija.')
     parser.add_argument('--model_name', required=True, type=str, help='Model name: "3B", "1B", "Helsinki_240M", "Helsinki_77M_512", "Helsinki_77M_256"')
     parser.add_argument('--max_len', required=True, type=int, help='Maximum length of the input text')
-    parser.add_argument('--train_nllb', required=True, type=int, help='Train NLLB model')
     
     args = parser.parse_args()
     
     # Dataset to use
-    DATA_PATH = "BounharAbdelaziz/Terjman-v2-English-Darija-Dataset-580K"
+    # DATA_PATH = "BounharAbdelaziz/Terjman-v2-English-Darija-Dataset-580K" # contains some bad samples, n_tokens \approx 78M
+    DATA_PATH = "BounharAbdelaziz/Terjman-v2-English-Darija-Dataset-350K"   # filtered out most bad samples, n_tokens \approx 59M
+    
     
     # experiment versions:
-    #   - 2.1: trained on 580K en-darija. source english, target darija
-    version = "2.1"
+    #   - 2.1: trained on 580K en-darija. source english, target darija, n_tokens \approx 78M
+    #   - 2.2: trained on 350K en-darija. source english, target darija, n_tokens \approx 59M
+    version = "2.2"
     
     # project name to appear in wandb
     project_name = f"Terjman-v{version}"
@@ -113,7 +115,7 @@ if __name__ == "__main__":
     save_steps = 100
     logging_steps = 50
     eval_strategy="steps"
-    push_to_hub=True
+    push_to_hub=False
     
     source_lang="english"
     target_lang="darija_Arab"
@@ -122,7 +124,6 @@ if __name__ == "__main__":
     
     MODEL_NAME = args.model_name
     MAX_LEN = args.max_len
-    TRAIN_NLLB = True if args.train_nllb == 1 else False
     FP16_TRAINING = False
     BF16_TRAINING = True
     TRAIN_FROM_SCRATCH = False
@@ -162,7 +163,7 @@ if __name__ == "__main__":
     LERANING_RATES = {  
         "Helsinki_77M_256": 3e-5,                                               # Terjman-Nano-MAX_LEN-256
         "Helsinki_77M_512": 3e-5,                                               # Terjman-Nano-MAX_LEN-512
-        "Helsinki_240M": 5e-5,                                                  # Terjman-Large was 5e-4 in v2.0
+        "Helsinki_240M": 1e-5,                                                  # Terjman-Large was 5e-4 in v2.0
         "1B": 3e-5,                                                             # Terjman-Ultra 5e-4 in v2.0
         "3B": 3e-5,                                                             # Terjman-Supreme 5e-4 in v2.0
     }
@@ -216,28 +217,22 @@ if __name__ == "__main__":
         }
     )
     
-    
-    print(f'[INFO] MODEL_NAME: {MODEL_NAME},  MAX_LEN: {MAX_LEN}, TRAIN_NLLB: {TRAIN_NLLB}')
-        
     # NLLB models
     if MODEL_NAME in ["1B", "3B"]:
-        assert TRAIN_NLLB == True, f'[ERROR] NLLB models requires TRAIN_NLLB set to True'
-        assert MAX_LEN == 1024, f'[ERROR] NLLB models requires MAX_LEN set to 1024'
-    
+        TRAIN_NLLB = True
     # Helsinki models
     elif MODEL_NAME in ["Helsinki_77M_256", "Helsinki_77M_512", "Helsinki_240M"]:
-        assert TRAIN_NLLB == False, f'[ERROR] Helsinki requires TRAIN_NLLB set to False'
-    
+        TRAIN_NLLB = False
     else:
         raise NotImplementedError(f'Model {MODEL_NAME} is not implemented yet! Choose from ["1B", "3B", "Helsinki_240M", "Helsinki_77M_512", "Helsinki_77M_256"]')
+    
+    print(f'[INFO] MODEL_NAME: {MODEL_NAME},  MAX_LEN: {MAX_LEN}, TRAIN_NLLB: {TRAIN_NLLB}')
     
     # check MAX_LEN for Helsinki models
     if MODEL_NAME == "Helsinki_77M_256":
         assert MAX_LEN == 256, f'Helsinki_77M_256 requires MAX_LEN set to 256'
     if MODEL_NAME == "Helsinki_77M_512":
         assert MAX_LEN == 512, f'Helsinki_77M_512 requires MAX_LEN set to 512'
-    if MODEL_NAME == "Helsinki_240M":
-        assert MAX_LEN == 1024, f'Helsinki_240M requires MAX_LEN set to 1024'
     
     metric = evaluate.load("sacrebleu")
     
