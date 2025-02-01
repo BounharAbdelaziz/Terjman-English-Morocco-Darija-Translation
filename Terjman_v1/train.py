@@ -5,7 +5,7 @@ from datasets import load_dataset, Dataset
 import evaluate
 import argparse
 import numpy as np
-from utils import print_gpu_utilization, count_total_tokens, preprocess_function, postprocess_text
+from Terjman_v2.utils import print_gpu_utilization, count_total_tokens, preprocess_function, postprocess_text
 
 
 def compute_metrics(eval_preds):

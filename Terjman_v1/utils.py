@@ -1,5 +1,5 @@
+import re
 from pynvml import *
-from tqdm import tqdm
 
 # ------------------------------------------------------------------------------------------------------------ #
 # ------------------------------------------------------------------------------------------------------------ #
@@ -43,7 +43,7 @@ def preprocess_function(examples, tokenizer, max_length=256, source_lang="englis
 # ------------------------------------------------------------------------------------------------------------ #
 # ------------------------------------------------------------------------------------------------------------ #
 
-def postprocess_text(preds, labels):
+def postprocess_text_old(preds, labels):
     preds = [pred.strip() for pred in preds]
     labels = [[label.strip()] for label in labels]
 
@@ -52,16 +52,9 @@ def postprocess_text(preds, labels):
 # ------------------------------------------------------------------------------------------------------------ #
 # ------------------------------------------------------------------------------------------------------------ #
 
-def count_total_tokens(dataset, tokenizer, target_lang="darija"):
-    total_tokens = 0
-
-    # Iterate over each sample in the dataset and count tokens
-    for example in tqdm(dataset, desc="Counting tokens"):
-        # Tokenize the text
-        tokens = tokenizer.tokenize(example[target_lang])
-        # Increment the total token count
-        total_tokens += len(tokens)
-        
+def count_total_tokens(dataset, target_lang="darija"):
+    
+    total_tokens = sum(dataset['darija_tokens'])
     print(f"[INFO] Total number of training tokens for column {target_lang} in the dataset: {total_tokens}")
 
 # ------------------------------------------------------------------------------------------------------------ #
