@@ -43,7 +43,7 @@ def preprocess_function(examples, tokenizer, max_length=256, source_lang="englis
 # ------------------------------------------------------------------------------------------------------------ #
 # ------------------------------------------------------------------------------------------------------------ #
 
-def postprocess_text_old(preds, labels):
+def postprocess_text(preds, labels):
     preds = [pred.strip() for pred in preds]
     labels = [[label.strip()] for label in labels]
 
