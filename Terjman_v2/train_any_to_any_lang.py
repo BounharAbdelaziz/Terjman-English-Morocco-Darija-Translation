@@ -12,11 +12,21 @@ from transformers import (
 # from accelerate import Accelerator
 from datasets import load_dataset
 import argparse
-from utils import print_gpu_utilization, count_total_tokens, preprocess_function, compute_metrics
+from utils import (
+    print_gpu_utilization, 
+    count_total_tokens, 
+    preprocess_function,
+    preprocess_multilingual,
+    compute_metrics,
+)
 
 from sacrebleu.metrics import BLEU, CHRF, TER
 
+
 if __name__ == "__main__":
+    
+    # any-to-any translation model
+    MULTILINGUAL = True # False, True
     
     # N.B: All trainings were on a A100-40Gb
     
@@ -33,7 +43,9 @@ if __name__ == "__main__":
     # v2.2
     # DATA_PATH = "BounharAbdelaziz/Terjman-v2-English-Darija-Dataset-350K"   # filtered out most bad samples, n_tokens \approx 59M
     # v2.3
-    DATA_PATH = "BounharAbdelaziz/Morocco-Darija-Translation-Dataset-22K-13-lang"   # filtered out most bad samples, n_tokens \approx 9M
+    DATA_PATH = "BounharAbdelaziz/Morocco-Darija-Translation-Dataset-22K-13-lang"   # kept only DODa (audio) and 10k samples from the 350K, n_tokens \approx 9M
+    
+    EVAL_DATA_PATH = "atlasia/TerjamaBench"
     
     
     # experiment versions:
@@ -63,14 +75,11 @@ if __name__ == "__main__":
     lr_scheduler_type = "linear"
     
     # Evaluation hyperparameters    
-    eval_steps = 100
-    save_steps = 100
-    logging_steps = 50
+    eval_steps = 50
+    save_steps = 50
+    logging_steps = 10
     eval_strategy="steps"
     push_to_hub=False
-    
-    source_lang="english"
-    target_lang="darija_Arab"
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
@@ -106,11 +115,11 @@ if __name__ == "__main__":
     }
     
     N_EPOCHS = {    
-        "Helsinki_77M_256": 3,                                                  # Terjman-Nano-MAX_LEN-256
-        "Helsinki_77M_512": 3,                                                  # Terjman-Nano-MAX_LEN-512
-        "Helsinki_240M": 2,                                                     # Terjman-Large was 120 then 100 in v2.0
-        "1B": 2,                                                                # Terjman-Ultra was 25, now training with 1 and 6. 30 in v2.0
-        "3B": 2,                                                                # Terjman-Supreme was 5
+        "Helsinki_77M_256": 8,                                                  # Terjman-Nano-MAX_LEN-256
+        "Helsinki_77M_512": 8,                                                  # Terjman-Nano-MAX_LEN-512
+        "Helsinki_240M": 10, #6,                                                     # Terjman-Large was 120 then 100 in v2.0
+        "1B": 10, # 6,                                                                # Terjman-Ultra was 25, now training with 1 and 6. 30 in v2.0
+        "3B": 6,                                                                # Terjman-Supreme was 5
     }
     
     LERANING_RATES = {  
@@ -139,13 +148,13 @@ if __name__ == "__main__":
     n_epochs = N_EPOCHS[MODEL_NAME]
     learning_rate = LERANING_RATES[MODEL_NAME]
     
-    
     use_flash_attention_2 = False #True if MODEL_NAME in ["3B"] else False
     
     fp16 = '-FP16' if FP16_TRAINING else ''
+    multilingual_tag = "ML" if MULTILINGUAL else ""
     
-    run_name = f'{BASE_MODEL.split("/")[-1]}-bs-{batch_size}-lr-{learning_rate}-ep-{n_epochs}-wp-{warmup_ratio}-gacc-{gradient_accumulation_steps}-gnm-{max_grad_norm}{fp16}-mx-{MAX_LEN}-v{version}'
-    HUB_PATH = f'{HUB_PATH}-bs-{batch_size}-lr-{learning_rate}-ep-{n_epochs}-wp-{warmup_ratio}-gacc-{gradient_accumulation_steps}-gnm-{max_grad_norm}-mx-{MAX_LEN}-v{version}'
+    run_name = f'{BASE_MODEL.split("/")[-1]}-bs-{batch_size*gradient_accumulation_steps}-lr-{learning_rate}-ep-{n_epochs}-wp-{warmup_ratio}-gnm-{max_grad_norm}{fp16}-mx-{MAX_LEN}-v{version}-{multilingual_tag}'
+    HUB_PATH = f'{HUB_PATH}-bs-{batch_size*gradient_accumulation_steps}-lr-{learning_rate}-ep-{n_epochs}-wp-{warmup_ratio}-gnm-{max_grad_norm}-mx-{MAX_LEN}-v{version}-{multilingual_tag}'
     
     assert '--' not in run_name, f"[WARN] Detected -- in run_name. This will cause a push_to_hub error! Found run_name={run_name} "
     assert len(run_name) < 96, f"[WARN] run_name too long, found len(run_name)={len(run_name)} > 96. This will cause a push_to_hub error! Consider squeezing it. Found run_name={run_name}"
@@ -173,6 +182,7 @@ if __name__ == "__main__":
             "gradient_accumulation_steps": gradient_accumulation_steps,
             "weight_decay": weight_decay,
             "dataset": DATA_PATH,
+            "multilingual": MULTILINGUAL,
         }
     )
     
@@ -194,24 +204,20 @@ if __name__ == "__main__":
         assert MAX_LEN == 512, f'Helsinki_77M_512 requires MAX_LEN set to 512'
     
     # Load training dataset from Hugging Face datasets
-    dataset = load_dataset(DATA_PATH)
-    print(f'[INFO] Dataset loaded successfully. Dataset: {dataset}')
+    train_dataset = load_dataset(DATA_PATH, split='train')
+    
+    # Load eval dataset (TerjamaBench)from Hugging Face datasets
+    test_dataset = load_dataset(EVAL_DATA_PATH, split='test')
+    
+    print(f'[INFO] Training dataset loaded successfully. train_dataset: {train_dataset}')
+    print(f'[INFO] Eval dataset loaded successfully. test_dataset: {test_dataset}')
     
     print("=" * 80)
-    print(f'[INFO] Will finetune the model {MODEL_NAME} for {n_epochs} epochs with a total batch size of {batch_size * gradient_accumulation_steps} on the dataset {DATA_PATH} of n_samples={len(dataset['train'])} and save it into {HUB_PATH} ...')
+    print(f'[INFO] Will finetune the model {MODEL_NAME} for {n_epochs} epochs with a total batch size of {batch_size * gradient_accumulation_steps} on the dataset {DATA_PATH} of n_samples={len(train_dataset)} and save it into {HUB_PATH} ...')
     print("=" * 80)
 
-    # Load model directly
-    if TRAIN_NLLB:
-        if TRAIN_FROM_SCRATCH:
-            tokenizer = AutoTokenizer.from_pretrained(MY_TOKENIZER_PATH)
-        else:
-            tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, src_lang="eng_Latn", tgt_lang="ary_Arab")
-    else:
-        if TRAIN_FROM_SCRATCH:
-            tokenizer = AutoTokenizer.from_pretrained(MY_TOKENIZER_PATH)
-        else:
-            tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     
     print(f'[INFO] Tokenizer vocab size: {len(tokenizer)}')
     
@@ -273,6 +279,7 @@ if __name__ == "__main__":
             
         print(f"Model encoder vocabulary size: {config.vocab_size}")
         print(f"Model decoder vocabulary size: {config.decoder_vocab_size}")
+    
     else:
         if FP16_TRAINING:
             # Initialize model for sequence to sequence learning
@@ -301,14 +308,55 @@ if __name__ == "__main__":
     # model = torch.compile(model)
         
     # Count total number of tokens in the dataset
-    count_total_tokens(dataset['train'], target_lang)
+    count_total_tokens(train_dataset, "ary_Arab")
     
     # Initialize a data collator object
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
     
     # tokenize the dataset
-    train_dataset = dataset['train'].map(lambda x : preprocess_function(x, tokenizer=tokenizer, max_length=MAX_LEN, source_lang=source_lang, target_lang=target_lang), batched=True, batch_size=64)
-    test_dataset = dataset['test'].map(lambda x : preprocess_function(x, tokenizer=tokenizer, max_length=MAX_LEN, source_lang=source_lang, target_lang=target_lang), batched=True, batch_size=64)
+    
+    if MULTILINGUAL:
+        print("[INFO] Processing dataset for multilingual training (any-to-any)")
+        # For multilingual training, randomly select source and target languages for each example
+        train_dataset = train_dataset.map(
+            lambda x: preprocess_multilingual(
+                x, 
+                tokenizer=tokenizer, 
+                max_length=MAX_LEN
+            ), 
+            batched=True, 
+            batch_size=64,
+            remove_columns=train_dataset.column_names  # Remove original columns to save memory
+        )
+    else:
+        # For English to Darija only, use fixed language pair
+        print("[INFO] Processing dataset for (english, ary_Arab) training")
+        
+        lang_pair = ("english", "ary_Arab", "eng_Latn", "ary_Arab")
+        train_dataset = train_dataset.map(
+            lambda x: preprocess_multilingual(
+                x, 
+                tokenizer=tokenizer, 
+                max_length=MAX_LEN, 
+                lang_pairs=lang_pair
+            ), 
+            batched=True, 
+            batch_size=64,
+            remove_columns=train_dataset.column_names # Remove original columns to save memory
+        )
+        
+    # TerjamaBench contains only english darija pairs
+    test_dataset = test_dataset.map(
+        lambda x : preprocess_function(
+            x, 
+            tokenizer=tokenizer, 
+            max_length=MAX_LEN, 
+            source_lang="English", 
+            target_lang="Darija",
+        ), 
+        batched=True, 
+        batch_size=64
+    )
     
     # Training arguments
     training_args = Seq2SeqTrainingArguments(
@@ -347,7 +395,13 @@ if __name__ == "__main__":
         eval_dataset=test_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        compute_metrics=lambda eval_preds: compute_metrics(eval_preds, tokenizer, metric_bleu, metric_chrf, metric_ter),
+        compute_metrics = lambda eval_preds: compute_metrics(
+            eval_preds, 
+            tokenizer, 
+            metric_bleu, 
+            metric_chrf,
+            metric_ter
+        ),
     )
     
     
