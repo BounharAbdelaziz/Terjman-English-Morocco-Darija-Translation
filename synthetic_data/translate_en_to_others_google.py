@@ -1,8 +1,8 @@
-import nest_asyncio
 from tqdm import tqdm
 from datasets import load_dataset
 from googletrans import Translator
 import asyncio
+import nest_asyncio
 
 # Apply nest_asyncio to allow nested event loops in Jupyter Notebooks
 nest_asyncio.apply()
@@ -28,18 +28,19 @@ def main():
         "french": "fra_Latn",
         "german": "deu_Latn",
         "spanish": "spa_Latn",
-        "portuguese": "por_Latn",
         "russian": "rus_Cyrl",
         "chinese_traditional": "zho_Hant",
         "japanese": "japanese",
         "korean": "korean",
         "greek": "ell_Grek",
         "italian": "italian",
-        "persian": "persian",
         "turkish": "tur_Latn",
         "wolof": "wolof",
         "hindi": "hin_Deva",
-        "hebrew": "heb_Hebr",
+        # not working
+        # "portuguese": "por_Latn",
+        # "persian": "persian",
+        # "hebrew": "heb_Hebr",
         # "sawahili": "sawahili",
     }
     
