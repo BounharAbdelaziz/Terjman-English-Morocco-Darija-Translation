@@ -75,9 +75,9 @@ if __name__ == "__main__":
     lr_scheduler_type = "linear"
     
     # Evaluation hyperparameters    
-    eval_steps = 50
-    save_steps = 50
-    logging_steps = 10
+    eval_steps = 25
+    save_steps = 25
+    logging_steps = 5
     eval_strategy="steps"
     push_to_hub=False
     
@@ -118,16 +118,16 @@ if __name__ == "__main__":
         "Helsinki_77M_256": 8,                                                  # Terjman-Nano-MAX_LEN-256
         "Helsinki_77M_512": 8,                                                  # Terjman-Nano-MAX_LEN-512
         "Helsinki_240M": 10, #6,                                                     # Terjman-Large was 120 then 100 in v2.0
-        "1B": 10, # 6,                                                                # Terjman-Ultra was 25, now training with 1 and 6. 30 in v2.0
-        "3B": 6,                                                                # Terjman-Supreme was 5
+        "1B": 3, #10, # 6,                                                                # Terjman-Ultra was 25, now training with 1 and 6. 30 in v2.0
+        "3B": 2, #6,                                                                # Terjman-Supreme was 5
     }
     
     LERANING_RATES = {  
         "Helsinki_77M_256": 5e-3,                                               # Terjman-Nano-MAX_LEN-256
         "Helsinki_77M_512": 1e-4,                                               # Terjman-Nano-MAX_LEN-512
         "Helsinki_240M": 1e-3, #5e-3, # 1e-4,                                   # Terjman-Large was 5e-4 in v2.0
-        "1B": 5e-3, #5e-4,                                                      # Terjman-Ultra 5e-4 in v2.0
-        "3B": 5e-4,                                                             # Terjman-Supreme 5e-4 in v2.0
+        "1B": 5e-5, #5e-3, #5e-4,                                                      # Terjman-Ultra 5e-4 in v2.0
+        "3B": 5e-5, #5e-4,                                                          # Terjman-Supreme 5e-4 in v2.0
     }
     
     GRAD_ACC = {    
