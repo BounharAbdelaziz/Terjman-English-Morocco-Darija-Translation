@@ -40,8 +40,12 @@ def split_dataset(dataset, test_size=0.9):
 
 def preprocess_function(examples, tokenizer, max_length=256, source_lang="english", target_lang="darija"):
     
-    inputs = ["eng_Latn " + str(example) for example in examples[source_lang]]
-    targets = ["ary_Arab " + str(example) for example in examples[target_lang]]
+    # Set the source and target languages on the tokenizer
+    tokenizer.src_lang = "eng_Latn"
+    tokenizer.tgt_lang = "ary_Arab"
+
+    inputs = [str(example) for example in examples[source_lang]]
+    targets = [str(example) for example in examples[target_lang]]
     
     model_inputs = tokenizer(inputs, text_target=targets, max_length=max_length, truncation=True)
     return model_inputs
