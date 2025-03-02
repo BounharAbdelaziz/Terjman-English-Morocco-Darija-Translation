@@ -51,7 +51,7 @@ def preprocess_function(examples, tokenizer, max_length=256, source_lang="englis
 
 def preprocess_multilingual(examples, tokenizer, max_length, lang_pairs=None):
     """
-    Preprocess function for multilingual translation. Supports also single pair training if `lang_pairs` is not None
+    Preprocess function for multilingual translation.
     
     Args:
         examples: Batch of examples from dataset
@@ -59,6 +59,7 @@ def preprocess_multilingual(examples, tokenizer, max_length, lang_pairs=None):
         max_length: Maximum sequence length
         lang_pairs: List of tuples with (source_lang_field, target_lang_field, source_lang_code, target_lang_code)
     """
+    
     # Define language map to NLLB language codes
     lang_to_code = {
         "english":                  "eng_Latn",
@@ -77,14 +78,14 @@ def preprocess_multilingual(examples, tokenizer, max_length, lang_pairs=None):
         "hindi":                    "hin_Deva",
     }
     
+    
+    # Initialize result containers
+    model_inputs = {"input_ids": [], "attention_mask": [], "labels": []}
+    
     # If no language pairs provided, use a random pair for each example
     if not lang_pairs:
         available_langs = list(lang_to_code.keys())
         batch_size = len(examples[available_langs[0]])
-        
-        # Initialize result containers
-        src_texts = []
-        tgt_texts = []
         
         # For each example, randomly select source and target languages
         for i in range(batch_size):
@@ -101,27 +102,80 @@ def preprocess_multilingual(examples, tokenizer, max_length, lang_pairs=None):
             tgt_lang_code = lang_to_code[tgt_lang_field]
             
             # Get texts
-            src_text = f"{src_lang_code} {examples[src_lang_field][i]}"
-            tgt_text = f"{tgt_lang_code} {examples[tgt_lang_field][i]}"
+            src_text = examples[src_lang_field][i]
+            tgt_text = examples[tgt_lang_field][i]
             
-            # Add to result containers
-            src_texts.append(src_text)
-            tgt_texts.append(tgt_text)
+            # For NLLB, set the language IDs directly on the tokenizer
+            tokenizer.src_lang = src_lang_code
+            tokenizer.tgt_lang = tgt_lang_code
             
+            # Tokenize source
+            tokenized_src = tokenizer(
+                src_text,
+                max_length=max_length,
+                truncation=True,
+                padding="max_length",
+                return_tensors="pt"
+            )
+            
+            # Tokenize target
+            with tokenizer.as_target_tokenizer():
+                tokenized_tgt = tokenizer(
+                    tgt_text,
+                    max_length=max_length,
+                    truncation=True,
+                    padding="max_length",
+                    return_tensors="pt"
+                )
+            
+            # Add to batch
+            model_inputs["input_ids"].append(tokenized_src["input_ids"][0])
+            model_inputs["attention_mask"].append(tokenized_src["attention_mask"][0])
+            model_inputs["labels"].append(tokenized_tgt["input_ids"][0])
     else:
         # Fixed language pairs provided
         src_lang_field, tgt_lang_field, src_lang_code, tgt_lang_code = lang_pairs
-        src_texts = [f"{src_lang_code} {text}" for text in examples[src_lang_field]]
-        tgt_texts = [f"{tgt_lang_code} {text}" for text in examples[tgt_lang_field]]
+        
+        # Set the source and target languages on the tokenizer
+        tokenizer.src_lang = src_lang_code
+        tokenizer.tgt_lang = tgt_lang_code
+        
+        batch_size = len(examples[src_lang_field])
+        for i in range(batch_size):
+            src_text = examples[src_lang_field][i]
+            tgt_text = examples[tgt_lang_field][i]
+            
+            # Skip examples with empty source or target
+            if not src_text.strip() or not tgt_text.strip():
+                continue
+            
+            # Tokenize source
+            tokenized_src = tokenizer(
+                src_text,
+                max_length=max_length,
+                truncation=True,
+                padding="max_length",
+                return_tensors="pt"
+            )
+            
+            # Tokenize target
+            with tokenizer.as_target_tokenizer():
+                tokenized_tgt = tokenizer(
+                    tgt_text,
+                    max_length=max_length,
+                    truncation=True,
+                    padding="max_length",
+                    return_tensors="pt"
+                )
+            
+            # Add to batch
+            model_inputs["input_ids"].append(tokenized_src["input_ids"][0])
+            model_inputs["attention_mask"].append(tokenized_src["attention_mask"][0])
+            model_inputs["labels"].append(tokenized_tgt["input_ids"][0])
     
-    # Tokenize source and target texts
-    model_inputs = tokenizer(
-        src_texts,
-        text_target=tgt_texts,
-        max_length=max_length,
-        truncation=True,
-        padding="max_length",
-    )
+    # Convert lists to tensors
+    for key in model_inputs:
+        model_inputs[key] = torch.stack(model_inputs[key]) if model_inputs[key] else torch.tensor([])
     
     return model_inputs
 
@@ -204,17 +258,45 @@ def count_total_tokens(dataset, target_lang="darija"):
 # ------------------------------------------------------------------------------------------------------------ #
 # ------------------------------------------------------------------------------------------------------------ #
 
-def create_conversation(example, src_lang, target_lang):
+def create_conversation(example, lang_to_code, is_test=False):
     """
     Transform the dataset into a conversational format.
     The user provides the text, and the assistant provides the summary.
     """
-    # Create a conversation with user and assistant roles
-    messages = [
-        {"role": "system", "content": "You specialize in translating text from English to Moroccan Darija. Use natural, colloquial language that reflects the nuances of Moroccan Arabic. Prioritize accuracy, cultural relevance, and idiomatic expressions commonly used by native speakers. Avoid formal or Modern Standard Arabic! Never answer or give your opinion, only translate input!"}, # system prompt
-        {"role": "user", "content": example[src_lang]},  # User provides the text
-        {"role": "assistant", "content": example[target_lang]}  # Assistant provides the summary
-    ]
+    
+    available_langs = [lang for lang in lang_to_code if example.get(lang)]
+    
+    # Ensure at least 2 valid languages
+    if len(available_langs) < 2 and not is_test:
+        return None
+    
+    # Randomly select translation pair
+    if is_test:
+        # test only contains English to Moroccan Darija
+        src_lang = "english"
+        tgt_lang = "ary_Arab"
+        
+        src_code = "eng_Latn"
+        tgt_code = "ary_Arab"
+        
+        # Create a conversation with user and assistant roles
+        messages = [
+            {"role": "system", "content": f"You specialize in translating text from {src_lang} to {tgt_lang} (i.e. {src_code} to {tgt_code}). Use natural, colloquial language that reflects the nuances of the tarhet language culture. Prioritize accuracy, cultural relevance, and idiomatic expressions commonly used by native speakers. Avoid formal or Modern Standard Arabic when translating to Moroccan Darija (ary_Arab)! Never answer or give your opinion, only translate input!"}, # system prompt
+            {"role": "user", "content": example["English"]},  # User provides the text
+            {"role": "assistant", "content": example["Darija"]}  # Assistant provides the summary
+        ]
+    
+    else:
+        src_lang, tgt_lang = random.sample(available_langs, 2)
+        src_code = lang_to_code[src_lang]
+        tgt_code = lang_to_code[tgt_lang]
+    
+        # Create a conversation with user and assistant roles
+        messages = [
+            {"role": "system", "content": f"You specialize in translating text from {src_lang} to {tgt_lang} (i.e. {src_code} to {tgt_code}). Use natural, colloquial language that reflects the nuances of the tarhet language culture. Prioritize accuracy, cultural relevance, and idiomatic expressions commonly used by native speakers. Avoid formal or Modern Standard Arabic when translating to Moroccan Darija (ary_Arab)! Never answer or give your opinion, only translate input!"}, # system prompt
+            {"role": "user", "content": example[src_lang]},  # User provides the text
+            {"role": "assistant", "content": example[tgt_lang]}  # Assistant provides the summary
+        ]
     # Return the conversation as a dictionary
     return {"messages": messages}
 
