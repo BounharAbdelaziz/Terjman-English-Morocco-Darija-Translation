@@ -26,6 +26,24 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 if __name__ == "__main__":
+    
+    # Define language pairs
+    lang_to_code = {
+        "english": "eng_Latn",
+        "ary_Arab": "ary_Arab",
+        "arabic": "ara_Arab",
+        "french": "fra_Latn",
+        "german": "deu_Latn",
+        "spanish": "spa_Latn",
+        "russian": "rus_Cyrl",
+        "chinese_traditional": "zho_Hant",
+        "japanese": "jpn_Jpan",
+        "korean": "kor_Hang",
+        "greek": "ell_Grek",
+        "italian": "ita_Latn",
+        "turkish": "tur_Latn",
+        "hindi": "hin_Deva",
+    }
 
     # Set up logging and tracking
     wandb.login()
@@ -66,8 +84,9 @@ if __name__ == "__main__":
     save_steps = config['hyperparameters']['save_steps']
     eval_steps = config['hyperparameters']['eval_steps']
 
-    # Training data path
+    # Training and eval data path
     TRAIN_DATA_PATH = config['DATASET_PATH']
+    EVAL_DATA_PATH = config['EVAL_DATA_PATH']
     
     # base model path
     BASE_MODEL = config['BASE_MODEL']
@@ -75,9 +94,6 @@ if __name__ == "__main__":
     IS_CAUSAL_LM = MODELS_DICT[BASE_MODEL]['CAUSAL_LM']
     IS_SFT_TRAINING = MODELS_DICT[BASE_MODEL]['SFT_TRAINING']
     FP16_TRAINING = config['FP16_TRAINING']
-    
-    # max training samples
-    MAX_TRAINING_SAMPLES = config['MAX_TRAINING_SAMPLES']
     
     if FP16_TRAINING:
         torch_dtype=torch.bfloat16 # bfloat16 has better precission than float16 thanks to bigger mantissa. Though not available with all GPUs architecture.
@@ -88,8 +104,11 @@ if __name__ == "__main__":
     SEED = config['SEED']
     set_seed(SEED)
    
-    # Load dataset
-    dataset = load_dataset(TRAIN_DATA_PATH)  # Replace with your dataset path
+    # Load training dataset from Hugging Face datasets
+    train_dataset = load_dataset(TRAIN_DATA_PATH, split='train')
+    
+    # Load eval dataset (TerjamaBench)from Hugging Face datasets
+    eval_dataset = load_dataset(EVAL_DATA_PATH, split='test')
     
     # Load tokenizer and model
     model = AutoModelForCausalLM.from_pretrained(
@@ -183,21 +202,32 @@ if __name__ == "__main__":
     tokenizer.chat_template = DEFAULT_CHAT_TEMPLATE
     
     # Transform the dataset into a conversational format
-    dataset["train"] = dataset["train"].map(lambda x: create_conversation(x, src_lang, target_lang))
-    dataset["test"] = dataset["test"].map(lambda x: create_conversation(x, src_lang, target_lang))
+    train_dataset = train_dataset.map(lambda x: create_conversation(x, lang_to_code, is_test=False))
+    eval_dataset = eval_dataset.map(lambda x: create_conversation(x, lang_to_code, is_test=True))
 
-    dataset = dataset.map(
+    print(f'train_dataset: {train_dataset}')
+    print(f'eval_dataset: {eval_dataset}')
+    train_dataset = train_dataset.map(
         apply_chat_template,
         num_proc=os.cpu_count(),
         fn_kwargs={"tokenizer": tokenizer},
-        remove_columns=["messages"],
-        desc="Applying chat template..."
+        remove_columns=[
+            'english', 'ary_Arab', 'ary_Latn', 'arabic', 'french', 'german',
+            'spanish', 'russian', 'chinese_traditional', 'japanese', 'korean',
+            'greek', 'italian', 'turkish', 'hindi', 'ary_tokens', 'dataset_source',
+            'messages'  
+        ], # Remove original columns and intermediate message format
+        desc="Applying chat template to train dataset..."
+    )
+    
+    eval_dataset = eval_dataset.map(
+        apply_chat_template,
+        num_proc=os.cpu_count(),
+        fn_kwargs={"tokenizer": tokenizer},
+        remove_columns=['topic', 'subtopic', 'Arabizi', 'English', 'Darija', 'annotator_dialect', 'messages'], # Remove original columns and intermediate message format
+        desc="Applying chat template to eval dataset..."
     )
 
-    # Create the splits
-    train_dataset = dataset["train"]
-    eval_dataset = dataset["test"]
-    
     # Training arguments
     training_args = TrainingArguments(
         output_dir=MODEL_RUN_SAVE_PATH,
@@ -231,7 +261,7 @@ if __name__ == "__main__":
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        dataset_text_field="text",
+        dataset_text_field="text",        
         max_seq_length=MAX_LEN,
         compute_metrics=lambda x : compute_metrics_causal_lm(x, tokenizer, metric_bleu, metric_chrf, metric_ter),
         preprocess_logits_for_metrics=preprocess_logits_for_metrics, # avoids OOM in eval
