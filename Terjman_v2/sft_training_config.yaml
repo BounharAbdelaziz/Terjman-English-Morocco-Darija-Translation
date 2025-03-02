@@ -1,31 +1,35 @@
-version: 2.2
+version: 2.3
 
 # Instruct models
 # BASE_MODEL: "Qwen2.5-0.5B-Instruct"               # 494M
 # BASE_MODEL: "Falcon3-1B-Instruct"                 # 1B
 # BASE_MODEL: "Qwen2.5-3B-Instruct"                 # 3B
 # BASE_MODEL: "Falcon3-3B-Instruct"
-BASE_MODEL: "Falcon3-10B-Instruct"
+# BASE_MODEL: "Falcon3-10B-Instruct"
+BASE_MODEL: "gemma-2-2b-it"
+# BASE_MODEL: "Al-Atlas-LLM-0.5B"
 
 # any-to-any
 MULTILINGUAL: true
 
 # Dataset to use
-DATASET_PATH: BounharAbdelaziz/Terjman-v2-English-Darija-Dataset-350K # We use the dataset filtered out from samples containing chinese characters "BounharAbdelaziz/Arabic-Synthetic-Summarization-Dataset"
+# DATASET_PATH: BounharAbdelaziz/Terjman-v2-English-Darija-Dataset-350K # We use the dataset filtered out from samples containing chinese characters "BounharAbdelaziz/Arabic-Synthetic-Summarization-Dataset"
+DATASET_PATH: "BounharAbdelaziz/Morocco-Darija-Translation-Dataset-22K-13-lang"   # kept only DODa (audio) and 10k samples from the 350K, n_tokens \approx 9M
+EVAL_DATA_PATH: "atlasia/TerjamaBench"
 
 # Training hyperparameters
 hyperparameters:
-    num_train_epochs: 2                 # as after 2 we saw a small bump in loss (decreasing)
-    lr: 0.0005                           # usually 1e-4 is recommended for Qwen models but as we have a small dataset, we prefer to go slowlier
-    batch_size: 4                       # 2 for 0.5B, 1 for 1B, and 2 for 3B LoRA
-    gradient_accumulation_steps: 32     # 16 for 0.5B, 32 for 1B
+    num_train_epochs: 3                 # as after 2 we saw a small bump in loss (decreasing)
+    lr: 0.00005                           # usually 1e-4 is recommended for Qwen models but as we have a small dataset, we prefer to go slowlier
+    batch_size: 2                       # 2 for 0.5B, 1 for 1B, and 2 for 3B LoRA
+    gradient_accumulation_steps: 16     # 16 for 0.5B, 32 for 1B
     # eval_accumulation_steps: 3        # to avoid OOM in eval. Slows down eval as it offloads to CPU.
     max_grad_norm: 1.0
     warmup_steps: 500
     warmup_ratio: 0.1
 
     # LoRA
-    USE_LORA: True #False True
+    USE_LORA: False #False True
     lora_r: 128
     lora_alpha: 64
     lora_dropout: 0.05
@@ -36,15 +40,12 @@ hyperparameters:
         - "o_proj"
 
     # Logging and saving
-    logging_steps: 50
-    save_steps: 100
-    eval_steps: 100
+    logging_steps: 5
+    save_steps: 20
+    eval_steps: 20
 
     optimizer: "adamw_torch_fused" # uses less memory. "adamw_torch" and "adamw_torch_fused" for > 1B models to fit in < 15GB VRAM  
-    MAX_LEN: 1024 # 1024 or 2048. For 0.5B 2048, and 1024 for > 1B model to fit in < 15GB VRAM
-
-# To observe how the model is performing when we increase the number of training samples
-MAX_TRAINING_SAMPLES: 5000 #5000
+    MAX_LEN: 2048 # 1024 or 2048. For 0.5B 2048, and 1024 for > 1B model to fit in < 15GB VRAM
 
 # Seed for reproducibility
 SEED: 42
@@ -85,5 +86,15 @@ MODELS_DICT:
 
     Falcon3-10B-Instruct:
         MODEL_PATH: "tiiuae/Falcon3-10B-Instruct"
+        CAUSAL_LM: true
+        SFT_TRAINING: true
+
+    gemma-2-2b-it:
+        MODEL_PATH: "google/gemma-2-2b-it"
+        CAUSAL_LM: true
+        SFT_TRAINING: true
+
+    Al-Atlas-LLM-0.5B:
+        MODEL_PATH: "BounharAbdelaziz/Al-Atlas-LLM-0.5B"
         CAUSAL_LM: true
         SFT_TRAINING: true
